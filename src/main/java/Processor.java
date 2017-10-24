@@ -27,15 +27,25 @@ public class Processor {
     private static String HOST_XCC_URI = null;
     private static String lastProcessedURI = "/";
     private static String batchQuery = null;
+    private static String documentHistoryQuery = null;
     private static boolean complete = false;
     private static ExecutorService es = Executors.newFixedThreadPool(Config.THREAD_POOL_SIZE);
     private static ContentSource cs = null;
 
 
     private static ResultSequence getBatch(String uri, Session sourceSession) {
-        String query = String.format("fn:count(cts:uris( \"%s\", ('limit=1000')))", uri);
-        LOG.debug(String.format("Query: %s", query));
+        LOG.info("running batch query");
+        String query = null;
+        try {
+            query = new String(Files.readAllBytes(Paths.get(Config.CTS_URI_COUNT_QUERY)));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        //String query = String.format("fn:count(cts:uris( \"%s\", ('limit=1000')))", uri);
+        //LOG.debug(String.format("Query: %s", query));
         Request request = sourceSession.newAdhocQuery(query);
+        request.setNewStringVariable("URI", uri);
         ResultSequence rs = null;
         try {
             rs = sourceSession.submitRequest(request);
@@ -45,9 +55,21 @@ public class Processor {
         boolean moreThanOne = (Integer.parseInt(rs.asString()) > 1);
 
         if (moreThanOne) {
-            request = sourceSession.newAdhocQuery(batchQuery.replace("(),", String.format("\"%s\",", uri)));
+            LOG.info("in more than one");
+            Request r2 = sourceSession.newAdhocQuery(batchQuery);
+            //LOG.info("batch query: "+ batchQuery);
+
+            /* Session session = cs.newSession("Documents");
+14
+        Request request = session.newAdhocQuery(xquery);
+15
+        request.setNewStringVariable("node-string", xmlcontent);
+*/
+            r2.setNewStringVariable("URI", uri);
+            LOG.info("URI passed to batch query: "+ uri);
             try {
-                rs = sourceSession.submitRequest(request);
+                rs = sourceSession.submitRequest(r2);
+                //LOG.info(rs.asString());
             } catch (RequestException e) {
                 e.printStackTrace();
             }
@@ -64,17 +86,14 @@ public class Processor {
     public static void main(String[] args) {
         Map<String, String> documentMap = new ConcurrentHashMap<>();
 
-        Configurations configs = new Configurations();
         try {
+            Configurations configs = new Configurations();
             Configuration config = configs.properties(new File("config.properties"));
             HOST_XCC_URI = config.getString("source.uri");
             LOG.debug(String.format("Configured Input XCC URI: %s", HOST_XCC_URI));
-        } catch (ConfigurationException cex) {
-            LOG.error("Configuration issue: ", cex);
-        }
-
-        try {
-            batchQuery = Config.CTS_URIS_QUERY;
+            LOG.info("running URIs query: "+ lastProcessedURI);
+            documentHistoryQuery = new String(Files.readAllBytes(Paths.get(Config.DOCUMENT_HISTORY_QUERY)));
+            batchQuery = new String(Files.readAllBytes(Paths.get(Config.CTS_URIS_QUERY)));
             cs = ContentSourceFactory.newContentSource(URI.create(HOST_XCC_URI));
             Session sourceSession = cs.newSession();
             while (!complete) {
@@ -117,28 +136,22 @@ public class Processor {
                 runFinalReport(documentMap);
             } */
 
-        } catch (XccConfigException | RequestException e) {
+        } catch (XccConfigException | RequestException | IOException | ConfigurationException e ) {
             LOG.error("Exception caught: ", e);
+        }
+        LOG.info("Total documents examined: " + documentMap.size());
+
+        // process report
+        for (String s : documentMap.keySet()){
+            String data = documentMap.get(s);
+            String[] data2 = data.split("~");
+            //LOG.info("URI: "+s+" Revisions: "+data2[0] +" Total latest false: "+ data2[1] + " Total latest true: " + data2[2]);
+            if (Integer.parseInt(data2[2]) > 1 ){
+                LOG.info(s);
+            }
         }
     }
 
-    private static void runFinalReport(Map<String, String> documentMap) {
-        LOG.info("Generating report ...");
-        for (String s : documentMap.keySet()) {
-           // MarkLogicDocument m = documentMap.get(s);
-            StringBuilder sb = new StringBuilder();
-            //sb.append("URI:\t").append(Config.ANSI_BLUE).append(m.getUri()).append(Config.ANSI_RESET).append("\tSource MD5:\t").append(m.getSourceMD5());
-           /* if (m.getSourceMD5().equals(m.getTargetMD5())) {
-                sb.append("\tTarget MD5:\t").append(Config.ANSI_GREEN).append(m.getTargetMD5()).append(Config.ANSI_RESET);
-            } else if (StringUtils.isEmpty(m.getTargetMD5())) {
-                sb.append(Config.ANSI_GREEN).append("\tURI synchronised").append(Config.ANSI_RESET);
-            } else {
-                sb.append("\tTarget MD5:\t").append(Config.ANSI_RED).append(m.getTargetMD5()).append(Config.ANSI_RESET);
-            }
-*/
-           LOG.info(sb.toString());
-        }
-    }
 
     private static void processResultSequence(Map<String, String> documentMap, ResultSequence rs) throws RequestException {
         if (rs != null) {
@@ -155,7 +168,21 @@ public class Processor {
             while (resultItemIterator.hasNext()) {
                 ResultItem i = resultItemIterator.next();
                 currentUri = i.asString();
-                //LOG.debug("X:"+i.asString());
+                //LOG.debug("URI:"+i.asString());
+
+
+
+                // DLS DOCUMENT HISTORY HERE
+
+                Session dlsSession = cs.newSession();
+                Request dlsRequest = dlsSession.newAdhocQuery(documentHistoryQuery);
+                dlsRequest.setNewStringVariable("URI", i.asString());
+                ResultSequence dlsRs = dlsSession.submitRequest(dlsRequest);
+
+                documentMap.put(i.asString(), dlsRs.asString());
+
+
+
                 //arkLogicDocument md = new MarkLogicDocument();
                 //md.setUri(i.asString().substring(0, i.asString().lastIndexOf("~~~")));
                 //md.setSourceMD5(i.asString().substring(i.asString().lastIndexOf("~~~") + 3));
@@ -193,7 +220,9 @@ public class Processor {
                 rsT.close();
                 documentMap.put(md.getUri(), md);
                 lastProcessedURI = md.getUri(); */
+
             }
+
             lastProcessedURI = currentUri;
             //tS.close();
             LOG.info(String.format("Last URI in batch of %s URI(s): %s%s%s", rs.size(), Config.ANSI_BLUE, lastProcessedURI, Config.ANSI_RESET));
@@ -204,73 +233,5 @@ public class Processor {
         }
     }
 
-    public static class DocumentCopier implements Runnable {
 
-        private void writeDocument() {
-            LOG.info("Doing something in a thread...");
-        }
-        /*
-        private MarkLogicDocument md;
-
-        DocumentCopier(MarkLogicDocument md) {
-            LOG.debug(String.format("Working on: %s", md.getUri()));
-            this.md = md;
-        }
-
-        private String buildAdHocQuery(String uri) {
-            StringBuilder sb = new StringBuilder();
-            sb.append(String.format(Config.FN_DOC, uri)).append(", ");
-            sb.append(String.format(Config.PROPERTIES_QUERY, uri)).append(", ");
-            sb.append(String.format(Config.PERMISSIONS_QUERY, uri)).append(", ");
-            sb.append(String.format(Config.COLLECTIONS_QUERY, uri));
-            return sb.toString();
-        }
-
-        private void writeDocument() {
-            LOG.debug(String.format("Writing Document %s", md.getUri()));
-            Session s = csSource.newSession();
-            Session t = csTarget.newSession();
-
-            LOG.debug(String.format("We need to copy this doc (%s) over", md.getUri()));
-
-            Request sourceDocReq = s.newAdhocQuery(buildAdHocQuery(md.getUri()));
-            ResultSequence rsS = null;
-            try {
-                rsS = s.submitRequest(sourceDocReq);
-                LOG.debug(String.format("Collection size: %d", rsS.size()));
-                LOG.debug(String.format("Full resultset: %s", rsS.asString("  ~ | *** | ~ ")));
-
-                // TODO - also copy metadata, qualities, etc?
-
-                ContentCreateOptions co = ContentCreateOptions.newXmlInstance();
-                // Only copy collections if there are any to copy:
-                LOG.debug(String.format("Collections: %d", rsS.resultItemAt(3).asString().length()));
-                if(rsS.resultItemAt(3).asString().length() > 0) {
-                    co.setCollections(rsS.resultItemAt(3).asString().split("~"));
-                }
-                //co.setMetadata();
-
-                Content content = ContentFactory.newContent(md.getUri(), rsS.resultItemAt(0).asString(), co);
-                t.insertContent(content);
-
-                LOG.debug(String.format("xdmp:document-set-properties(\"%s\", %s)", md.getUri(), rsS.resultItemAt(1).asString()));
-
-                Request targetProps = t.newAdhocQuery(String.format("xdmp:document-set-properties(\"%s\", %s)", md.getUri(), rsS.resultItemAt(1).asString()));
-                t.submitRequest(targetProps);
-
-                Request targetPerms = t.newAdhocQuery(String.format("xdmp:document-set-permissions(\"%s\", %s)", md.getUri(), rsS.resultItemAt(2).asString()));
-                t.submitRequest(targetPerms);
-
-            } catch (RequestException e) {
-                LOG.error("Exception caught: ", e);
-            }
-
-            s.close();
-            t.close();
-        } */
-
-        public void run() {
-            writeDocument();
-        }
-    }
 }

@@ -17,7 +17,7 @@ dependencies {
     compile group: 'ch.qos.logback', name: 'logback-classic', version: '1.2.3'
     compile group: 'com.marklogic', name: 'marklogic-xcc', version: '9.0.3'
     compile group: 'org.apache.commons', name: 'commons-lang3', version: '3.6'
-    compile group: 'org.apache.commons', name: 'commons-configuration2', version: '2.1.1'
+    compile group: 'org.apache.commons', name: 'commons-configuration2', version: '2.2'
     compile group: 'commons-beanutils', name: 'commons-beanutils', version: '1.9.3'
 }
 
