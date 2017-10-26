@@ -166,7 +166,7 @@ public class Processor {
                 documentMap.put(uri, dlsRs.asString());
                 dlsSession.close();
             } catch (RequestException e) {
-                LOG.error("Exception caught: ", e);
+                LOG.error(String.format("Exception caught while processing URI: %s", uri), e);
             }
         }
     }
