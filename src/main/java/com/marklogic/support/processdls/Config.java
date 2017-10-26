@@ -12,6 +12,6 @@ public class Config {
     public static final String CTS_URI_COUNT_QUERY = "src/main/resources/uri-count-query.xqy";
     public static final String CTS_URIS_QUERY = "src/main/resources/uri-query.xqy";
     public static final String DOCUMENT_HISTORY_QUERY = "src/main/resources/document-history.xqy";
-
+    public static final String URI_VERSIONS_QUERY = "src/main/resources/uri-versions.xqy";
 
 }

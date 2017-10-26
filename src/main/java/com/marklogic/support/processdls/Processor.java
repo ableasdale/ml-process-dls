@@ -30,6 +30,7 @@ public class Processor {
     private static String lastProcessedURI = "/";
     private static String batchQuery = null;
     private static String documentHistoryQuery = null;
+    private static String uriVersionsQuery = null;
     private static boolean complete = false;
     private static ExecutorService es = Executors.newFixedThreadPool(Config.THREAD_POOL_SIZE);
     private static ContentSource cs = null;
@@ -80,9 +81,10 @@ public class Processor {
             Configuration config = configs.properties(new File("config.properties"));
             HOST_XCC_URI = config.getString("source.uri");
             LOG.debug(String.format("Configured Input XCC URI: %s", HOST_XCC_URI));
-            LOG.info("running URIs query: " + lastProcessedURI);
+            LOG.info(String.format("running URIs query: %s", lastProcessedURI));
             documentHistoryQuery = new String(Files.readAllBytes(Paths.get(Config.DOCUMENT_HISTORY_QUERY)));
             batchQuery = new String(Files.readAllBytes(Paths.get(Config.CTS_URIS_QUERY)));
+            uriVersionsQuery = new String(Files.readAllBytes(Paths.get(Config.URI_VERSIONS_QUERY)));
             cs = ContentSourceFactory.newContentSource(URI.create(HOST_XCC_URI));
             Session sourceSession = cs.newSession();
             while (!complete) {
@@ -112,9 +114,9 @@ public class Processor {
         for (String s : documentMap.keySet()) {
             String data = documentMap.get(s);
             String[] data2 = data.split("~");
-            LOG.debug("URI: " + s + " Revisions: " + data2[0] + " Total latest false: " + data2[1] + " Total latest true: " + data2[2]);
+            LOG.debug(String.format("URI: %s Revisions: %s Total latest false: %s Total latest true: %s", s, data2[0], data2[1], data2[2]));
             if (Integer.parseInt(data2[2]) > 1) {
-                LOG.info("URI found with more than one 'dls:latest' property: " + s);
+                LOG.info(String.format("URI found with more than one 'dls:latest' property: %s", s));
             }
         }
     }
@@ -163,7 +165,27 @@ public class Processor {
                 dlsRequest.setNewStringVariable("URI", uri);
                 ResultSequence dlsRs = dlsSession.submitRequest(dlsRequest);
 
+
+                String[] data = dlsRs.asString().split("~");
+                if (Integer.parseInt(data[2]) > 1) {
+                    LOG.info(String.format("Making a change to: %s", uri));
+                    Session d2 = cs.newSession();
+                    Request d2r = dlsSession.newAdhocQuery(uriVersionsQuery);
+                    d2r.setNewStringVariable("URI", uri);
+                    ResultSequence d2rs = d2.submitRequest(d2r);
+                    // iterate
+                    Iterator<ResultItem> resultItemIterator = d2rs.iterator();
+                    while (resultItemIterator.hasNext()) {
+                        LOG.info("ITEM: "+ resultItemIterator.next().asString());
+                    }
+                    d2rs.close();
+                    d2.close();
+                    // /content/assets/2017/06/29/16/06/6013a428-75f9-b729-fe82-db3abe8c4278a3311b88.xml
+                    // /content/assets/2017/06/29/16/06/6013a428-75f9-b729-fe82-db3abe8c4278a3311b88_xml_versions/1-6013a428-75f9-b729-fe82-db3abe8c4278a3311b88.xml
+                }
+
                 documentMap.put(uri, dlsRs.asString());
+                dlsRs.close();
                 dlsSession.close();
             } catch (RequestException e) {
                 LOG.error(String.format("Exception caught while processing URI: %s", uri), e);
