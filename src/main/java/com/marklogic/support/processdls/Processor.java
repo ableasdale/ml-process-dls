@@ -170,16 +170,27 @@ public class Processor {
                 if (Integer.parseInt(data[2]) > 1) {
                     LOG.info(String.format("Making a change to: %s", uri));
                     Session d2 = cs.newSession();
-                    Request d2r = dlsSession.newAdhocQuery(uriVersionsQuery);
+                    Request d2r = d2.newAdhocQuery(uriVersionsQuery);
                     d2r.setNewStringVariable("URI", uri);
                     ResultSequence d2rs = d2.submitRequest(d2r);
                     // iterate
                     Iterator<ResultItem> resultItemIterator = d2rs.iterator();
                     while (resultItemIterator.hasNext()) {
-                        LOG.info("ITEM: "+ resultItemIterator.next().asString());
+                        String item = resultItemIterator.next().asString();
+                        if (!resultItemIterator.hasNext()){
+                            LOG.info("last item: "+item + " no processing");
+                        } else {
+                            LOG.info("ITEM: " + item);
+                            if(item.contains("true")){
+                                LOG.info("MUST FIX: "+item);
+                            }
+                        }
+
                     }
                     d2rs.close();
                     d2.close();
+
+                    // xdmp:document-properties("/10988734552927421120_xml_versions/3-10988734552927421120.xml")
                     // /content/assets/2017/06/29/16/06/6013a428-75f9-b729-fe82-db3abe8c4278a3311b88.xml
                     // /content/assets/2017/06/29/16/06/6013a428-75f9-b729-fe82-db3abe8c4278a3311b88_xml_versions/1-6013a428-75f9-b729-fe82-db3abe8c4278a3311b88.xml
                 }
