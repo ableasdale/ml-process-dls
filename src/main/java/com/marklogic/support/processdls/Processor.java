@@ -31,10 +31,10 @@ public class Processor {
     private static String batchQuery = null;
     private static String documentHistoryQuery = null;
     private static String uriVersionsQuery = null;
+    private static String changeDlsLatestQuery = null;
     private static boolean complete = false;
     private static ExecutorService es = Executors.newFixedThreadPool(Config.THREAD_POOL_SIZE);
     private static ContentSource cs = null;
-
 
     private static ResultSequence getBatch(String uri, Session sourceSession) {
         String query = null;
@@ -85,6 +85,7 @@ public class Processor {
             documentHistoryQuery = new String(Files.readAllBytes(Paths.get(Config.DOCUMENT_HISTORY_QUERY)));
             batchQuery = new String(Files.readAllBytes(Paths.get(Config.CTS_URIS_QUERY)));
             uriVersionsQuery = new String(Files.readAllBytes(Paths.get(Config.URI_VERSIONS_QUERY)));
+            changeDlsLatestQuery = new String(Files.readAllBytes(Paths.get(Config.CHANGE_DLS_LATEST_QUERY)));
             cs = ContentSourceFactory.newContentSource(URI.create(HOST_XCC_URI));
             Session sourceSession = cs.newSession();
             while (!complete) {
@@ -121,7 +122,6 @@ public class Processor {
         }
     }
 
-
     private static void processResultSequence(Map<String, String> documentMap, ResultSequence rs) throws RequestException {
         if (rs != null) {
             if (rs.size() <= 1) {
@@ -148,7 +148,6 @@ public class Processor {
         }
     }
 
-
     public static class DLSHistoryProcessor implements Runnable {
 
         String uri;
@@ -168,31 +167,35 @@ public class Processor {
 
                 String[] data = dlsRs.asString().split("~");
                 if (Integer.parseInt(data[2]) > 1) {
-                    LOG.info(String.format("Making a change to: %s", uri));
+                    LOG.debug(String.format("Making a change to: %s", uri));
                     Session d2 = cs.newSession();
                     Request d2r = d2.newAdhocQuery(uriVersionsQuery);
                     d2r.setNewStringVariable("URI", uri);
                     ResultSequence d2rs = d2.submitRequest(d2r);
-                    // iterate
+
+                    // iterate through and fix
                     Iterator<ResultItem> resultItemIterator = d2rs.iterator();
                     while (resultItemIterator.hasNext()) {
                         String item = resultItemIterator.next().asString();
-                        if (!resultItemIterator.hasNext()){
-                            LOG.info("last item: "+item + " no processing");
+                        if (!resultItemIterator.hasNext()) {
+                            LOG.debug(String.format("Last item: %s ignoring (no processing will take place for this item)", item));
                         } else {
-                            LOG.info("ITEM: " + item);
-                            if(item.contains("true")){
-                                LOG.info("MUST FIX: "+item);
+                            LOG.debug(String.format("Item: %s", item));
+                            if (item.contains("true")) {
+                                // Build the URI
+                                String constructedUri = uri.replace(".", "_") + "_versions/" + item.split("~")[0] + "-" + uri.substring(1);
+                                LOG.info(String.format("Attempting to fix: %s", constructedUri));
+
+                                Session d3 = cs.newSession();
+                                Request d3r = d3.newAdhocQuery(changeDlsLatestQuery);
+                                d3r.setNewStringVariable("URI", constructedUri);
+                                d3.submitRequest(d3r);
+                                d3.close();
                             }
                         }
-
                     }
                     d2rs.close();
                     d2.close();
-
-                    // xdmp:document-properties("/10988734552927421120_xml_versions/3-10988734552927421120.xml")
-                    // /content/assets/2017/06/29/16/06/6013a428-75f9-b729-fe82-db3abe8c4278a3311b88.xml
-                    // /content/assets/2017/06/29/16/06/6013a428-75f9-b729-fe82-db3abe8c4278a3311b88_xml_versions/1-6013a428-75f9-b729-fe82-db3abe8c4278a3311b88.xml
                 }
 
                 documentMap.put(uri, dlsRs.asString());
@@ -200,9 +203,8 @@ public class Processor {
                 dlsSession.close();
             } catch (RequestException e) {
                 LOG.error(String.format("Exception caught while processing URI: %s", uri), e);
+                // TODO - investigate maintaining a list of failed URIs and re-processing them at the end?
             }
         }
     }
-
-
 }
